@@ -1,6 +1,6 @@
 {
   "name": "auto-fix-all-open",
-  "displayName": "Fix All Open",
+  "displayName": "Auto Fix All Open",
   "description": "Behebt alle automatisch behebbaren Probleme (inkl. spezieller Markdown-Regeln) in allen geöffneten Dateien, speichert diese direkt ab und bietet eine Rückgängig-Funktion.",
   "version": "1.0.2",
   "publisher": "DanielRoesch",
