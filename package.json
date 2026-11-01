@@ -1,0 +1,69 @@
+{
+  "name": "auto-fix-all-open",
+  "displayName": "Auto-Fix All & Markdown Enhancer",
+  "description": "Behebt alle automatisch lösbaren Probleme in geöffneten Dateien (inkl. spezieller Markdown-Codeblock-Erkennung für Bäume und Shell-Befehle) mit Undo-Funktion.",
+  "version": "1.0.0",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Linters",
+    "Formatters",
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "auto-fix-all.fixAllOpen",
+        "title": "Alle Probleme in offenen Dateien beheben & speichern",
+        "shortTitle": "Auto-Fix All",
+        "category": "Auto-Fix",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "auto-fix-all.undoLastFix",
+        "title": "Letzten Auto-Fix Vorgang rückgängig machen",
+        "shortTitle": "Undo Auto-Fix",
+        "category": "Auto-Fix",
+        "icon": "$(discard)"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "auto-fix-all.fixAllOpen",
+          "group": "navigation@1",
+          "when": "editorTextFocus"
+        },
+        {
+          "command": "auto-fix-all.undoLastFix",
+          "group": "navigation@2",
+          "when": "autoFixAll.canUndo"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "auto-fix-all.fixAllOpen"
+        },
+        {
+          "command": "auto-fix-all.undoLastFix",
+          "when": "autoFixAll.canUndo"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^20.x",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.0"
+  }
+}
