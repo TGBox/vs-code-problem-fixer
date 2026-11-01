@@ -25,16 +25,16 @@ export function activate(context: vscode.ExtensionContext) {
     // Initialisiere den Context-Key für die Sichtbarkeit des Undo-Buttons
     vscode.commands.executeCommand('setContext', 'autoFixAll.canUndo', false);
 
-    // 1. Statusleisten-Button zum Beheben (direkt links neben der Fehler/Warnungs-Anzeige)
-    // Die offizielle Problem-Anzeige von VS Code hat eine hohe Priorität auf der linken Seite.
-    fixStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 99);
+    // 1. Statusleisten-Button zum Beheben (extrem hohe Priorität 10000 = ganz links neben dem Probleme-Zähler)
+    fixStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 10000);
     fixStatusBarItem.command = 'auto-fix-all.fixAllOpen';
     fixStatusBarItem.text = '$(sparkle) Auto-Fix All';
-    fixStatusBarItem.tooltip = 'Behebt alle automatisch lösbaren Probleme & Markdown-Codeblöcke in offenen Dateien und speichert diese.';
+    fixStatusBarItem.tooltip = 'Behebt alle automatisch lösbaren Probleme & Markdown-Fehler in offenen Dateien und speichert diese.';
+    fixStatusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.prominentBackground');
     fixStatusBarItem.show();
 
     // 2. Statusleisten-Button für Undo (wird nur angezeigt, wenn ein Backup existiert)
-    undoStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 98);
+    undoStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 9999);
     undoStatusBarItem.command = 'auto-fix-all.undoLastFix';
     undoStatusBarItem.text = '$(discard) Undo Auto-Fix';
     undoStatusBarItem.tooltip = 'Macht den letzten Auto-Fix Durchlauf über alle Dateien hinweg rückgängig.';
@@ -98,38 +98,61 @@ async function runAutoFixOnAllOpenFiles(): Promise<void> {
                     }
 
                     const originalContent = document.getText();
+                    const isMarkdown = document.languageId === 'markdown' || uri.fsPath.toLowerCase().endsWith('.md');
 
-                    // Schritt A: Spezielle Regel für Markdown-Dateien (Codeblöcke ohne Sprache -> MD040)
-                    if (document.languageId === 'markdown' || uri.fsPath.toLowerCase().endsWith('.md')) {
-                        await fixUnlabeledMarkdownCodeBlocks(document);
-                    }
-
-                    // Schritt B: Dokument kurz im Editor fokussieren, damit 'editor.action.fixAll'
+                    // Schritt A: Dokument im Editor fokussieren, damit 'editor.action.fixAll'
                     // und 'markdownlint.fixAll' zuverlässig auf diesem Dokument arbeiten können.
                     await vscode.window.showTextDocument(document, {
                         preview: false,
                         preserveFocus: false
                     });
 
-                    // Kleine Pause, damit Language Server & Linter (wie markdownlint) den Fokuswechsel registrieren
-                    await delay(60);
+                    // Pause, damit Language Server & Linter (wie markdownlint) das Dokument analysieren können
+                    await delay(150);
 
-                    // 1. Standard VS Code Auto-Fix für alle unterstützten Linter (ESLint, TypeScript, etc.)
-                    await vscode.commands.executeCommand('editor.action.fixAll');
+                    // Schritt B: Spezielle eigene Regeln für Markdown-Dateien anwenden:
+                    // - MD040: Codeblöcke ohne Sprache (Baumstruktur -> text, Befehle -> bash)
+                    // - MD036: Emphasis used as heading (**Titel** -> ## **Titel**)
+                    // - MD025: Doppelte Top-Level-Überschriften (# Titel -> ## Titel ab der 2. H1)
+                    if (isMarkdown) {
+                        await applyCustomMarkdownFixes(document);
+                        await delay(80);
+                    }
 
-                    // 2. Spezieller Aufruf für die beliebte "markdownlint" Extension (falls installiert)
-                    if (document.languageId === 'markdown' || uri.fsPath.toLowerCase().endsWith('.md')) {
-                        try {
-                            const allCommands = await vscode.commands.getCommands(true);
-                            if (allCommands.includes('markdownlint.fixAll')) {
+                    // Schritt C: Mehrstufiger Auto-Fix-Durchlauf (bis zu 3 Runden),
+                    // da manche Linter-Regeln erst nach dem ersten Fix neue Folge-Fixes freischalten.
+                    const allCommands = await vscode.commands.getCommands(true);
+                    const hasMarkdownlintFix = allCommands.includes('markdownlint.fixAll');
+
+                    for (let pass = 0; pass < 3; pass++) {
+                        const textBeforePass = document.getText();
+
+                        // 1. Standard VS Code Auto-Fix (ESLint, TypeScript, markdownlint via CodeAction, etc.)
+                        await vscode.commands.executeCommand('editor.action.fixAll');
+
+                        // 2. Spezieller Aufruf für die "markdownlint" Extension
+                        if (isMarkdown && hasMarkdownlintFix) {
+                            try {
                                 await vscode.commands.executeCommand('markdownlint.fixAll');
+                            } catch {
+                                // Ignorieren, falls Aufruf fehlschlägt
                             }
-                        } catch {
-                            // Ignorieren, falls markdownlint nicht installiert ist
+                        }
+
+                        // Kurz warten, damit Edits angewendet und neue Diagnostics berechnet werden
+                        await delay(120);
+
+                        if (isMarkdown) {
+                            await applyCustomMarkdownFixes(document);
+                        }
+
+                        // Wenn sich in diesem Durchlauf nichts mehr geändert hat, sind wir fertig
+                        if (document.getText() === textBeforePass) {
+                            break;
                         }
                     }
 
-                    // Schritt C: Prüfen, ob sich der Dateiinhalt verändert hat
+                    // Schritt D: Prüfen, ob sich der Dateiinhalt insgesamt verändert hat
                     const newContent = document.getText();
                     if (newContent !== originalContent) {
                         currentBatchSnapshots.push({
@@ -139,7 +162,7 @@ async function runAutoFixOnAllOpenFiles(): Promise<void> {
                         modifiedFilesCount++;
                     }
 
-                    // Schritt D: Datei direkt abspeichern (falls sie Änderungen hat oder "dirty" war)
+                    // Schritt E: Datei direkt abspeichern (falls sie Änderungen hat oder "dirty" war)
                     if (document.isDirty) {
                         await document.save();
                     }
@@ -279,12 +302,14 @@ function getAllOpenTextDocumentUris(): vscode.Uri[] {
 }
 
 /**
- * Analysiert ein Markdown-Dokument auf Codeblöcke ohne Sprachkennzeichnung (MD040)
- * und ergänzt automatisch die passende Sprache (`text` bei Baumstrukturen, `bash` bei Konsolenbefehlen).
+ * Analysiert ein Markdown-Dokument und behebt spezielle KI/Agenten-Markdown-Fehler:
+ * 1. MD040: Codeblöcke ohne Sprachkennzeichnung (`text` bei Bäumen, `bash` bei Konsolenbefehlen)
+ * 2. MD036: Emphasis used instead of a heading (`## ` vor alleinstehende fett/kursiv Zeilen setzen)
+ * 3. MD025: Multiple top-level headings in the same document (ab der 2. `# ` Überschrift ein `#` ergänzen -> `## `)
  */
-async function fixUnlabeledMarkdownCodeBlocks(document: vscode.TextDocument): Promise<boolean> {
+async function applyCustomMarkdownFixes(document: vscode.TextDocument): Promise<boolean> {
     const originalText = document.getText();
-    const updatedText = processMarkdownCodeBlocks(originalText);
+    const updatedText = processCustomMarkdownRules(originalText);
 
     if (updatedText === originalText) {
         return false;
@@ -301,10 +326,10 @@ async function fixUnlabeledMarkdownCodeBlocks(document: vscode.TextDocument): Pr
 }
 
 /**
- * Parst Zeilen eines Markdown-Texts und versieht unmarkierte Fenced Code Blocks (``` oder ~~~)
- * anhand ihres Inhalts mit der passenden Sprach-ID.
+ * Parst Zeilen eines Markdown-Texts und behebt MD040 (Codeblöcke), MD025 (Doppelte H1)
+ * sowie MD036 (Emphasis als Überschrift).
  */
-function processMarkdownCodeBlocks(markdownText: string): string {
+function processCustomMarkdownRules(markdownText: string): string {
     const lines = markdownText.split(/\r?\n/);
     const lineBreak = markdownText.includes('\r\n') ? '\r\n' : '\n';
 
@@ -315,11 +340,31 @@ function processMarkdownCodeBlocks(markdownText: string): string {
     let isUnlabeledBlock = false;
     let blockLines: string[] = [];
 
+    let inYamlFrontMatter = false;
+    let seenTopLevelHeading = false;
+
+    // Falls im YAML Front-Matter bereits ein "title:" definiert ist, zählt markdownlint (MD025)
+    // diesen oft schon als erste H1-Überschrift.
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
 
+        // 0. YAML Front-Matter am Dateianfang überspringen (und auf title: prüfen)
+        if (i === 0 && line.trim() === '---') {
+            inYamlFrontMatter = true;
+            continue;
+        }
+        if (inYamlFrontMatter) {
+            if (/^title\s*:/i.test(line.trim())) {
+                seenTopLevelHeading = true;
+            }
+            if (line.trim() === '---' || line.trim() === '...') {
+                inYamlFrontMatter = false;
+            }
+            continue;
+        }
+
+        // 1. Codeblock-Verarbeitung (MD040)
         if (!inCodeBlock) {
-            // Prüfe auf öffnenden Codeblock: optionales Einrücken, gefolgt von mindestens 3 ` oder ~
             const openMatch = line.match(/^(\s*)(`{3,}|~{3,})(.*)$/);
             if (openMatch) {
                 inCodeBlock = true;
@@ -330,28 +375,64 @@ function processMarkdownCodeBlocks(markdownText: string): string {
                 openingLineIndex = i;
                 isUnlabeledBlock = infoString.length === 0;
                 blockLines = [];
+                continue;
             }
         } else {
-            // Prüfe auf schließenden Codeblock (gleiches Zeichen, mindestens gleiche Länge)
             const closeRegex = new RegExp(`^\\s*${currentFenceChar}{${currentFenceLength},}\\s*$`);
             if (closeRegex.test(line)) {
                 if (isUnlabeledBlock && openingLineIndex !== -1) {
                     const inferredLang = inferCodeBlockLanguage(blockLines);
-                    // Öffnende Zeile mit der erkannten Sprache aktualisieren (z. B. ``` -> ```bash)
                     lines[openingLineIndex] = lines[openingLineIndex].replace(
                         /^(\s*)(`{3,}|~{3,})\s*$/,
                         `$1$2${inferredLang}`
                     );
                 }
 
-                // Reset für den nächsten Block
                 inCodeBlock = false;
                 openingLineIndex = -1;
                 isUnlabeledBlock = false;
                 blockLines = [];
+            } else if (isUnlabeledBlock) {
+                blockLines.push(line);
+            }
+            continue;
+        }
+
+        // =====================================================================
+        // Außerhalb von Codeblöcken: MD025 & MD036 prüfen
+        // =====================================================================
+
+        // 2. MD025: Doppelte Top-Level-Heading (# Überschrift)
+        // Prüft auf Zeilen, die mit genau einem '#' gefolgt von Leerzeichen beginnen
+        const h1Match = line.match(/^(\s*)#(\s+.*)$/);
+        if (h1Match) {
+            if (!seenTopLevelHeading) {
+                seenTopLevelHeading = true;
             } else {
-                if (isUnlabeledBlock) {
-                    blockLines.push(line);
+                // Zweite (oder weitere) Top-Level-Überschrift gefunden -> '#' direkt dahinter einfügen (wird zu '##')
+                lines[i] = `${h1Match[1]}##${h1Match[2]}`;
+            }
+            continue;
+        }
+
+        // 3. MD036: Emphasis used instead of a heading
+        // markdownlint meldet MD036, wenn ein einzeiliger Absatz (umgeben von Leerzeilen bzw. Dokumentanfang/-ende)
+        // komplett aus **Text**, __Text__, *Text* oder _Text_ besteht und NICHT auf Satzzeichen (., !, ?, :, ;) endet.
+        const prevLineEmpty = (i === 0) || (lines[i - 1].trim() === '');
+        const nextLineEmpty = (i === lines.length - 1) || (lines[i + 1].trim() === '');
+
+        if (prevLineEmpty && nextLineEmpty) {
+            const emphasisHeadingMatch = line.match(/^(\s*)(\*\*|__|\*|_)(?!\s)(.+?)(?<!\s)\2\s*$/);
+            if (emphasisHeadingMatch) {
+                const innerText = emphasisHeadingMatch[3].trim();
+                const endsWithPunctuation = /[.,!?:;]$/.test(innerText);
+                // Sicherstellen, dass im Inneren nicht das gleiche Emphasis-Zeichen geschlossen und neu geöffnet wurde
+                const marker = emphasisHeadingMatch[2];
+                const isSingleEmphasisSpan = !innerText.includes(marker);
+
+                if (!endsWithPunctuation && isSingleEmphasisSpan) {
+                    // Wie gewünscht einfach "## " vor die hervorgehobene Stelle packen
+                    lines[i] = `${emphasisHeadingMatch[1]}## ${line.trim()}`;
                 }
             }
         }
