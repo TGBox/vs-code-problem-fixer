@@ -6,6 +6,10 @@
   "engines": {
     "vscode": "^1.85.0"
   },
+  "author": {
+    "name": "Daniel Rösch",
+    "email": "daniel.roesch91@gmail.com"
+  },
   "categories": [
     "Linters",
     "Formatters",
