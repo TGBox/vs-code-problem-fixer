@@ -12,3 +12,7 @@ Speziell optimiert für durch KI-Agenten erstellte `.md` (Markdown)-Dateien!
   * **MD025 (Multiple Top-Level Headings):** Wandelt ab der zweiten `#`-Überschrift im Dokument diese automatisch in `##` um.
   * **MD036 (Emphasis used as Heading):** Wandelt alleinstehende hervorgehobene Zeilen (`**Überschrift**`) automatisch in echte Überschriften (`## **Überschrift**`) um.
 * **Sicheres Undo-System:** Macht bei Bedarf den gesamten letzten Auto-Fix-Durchlauf über alle betroffenen Dateien hinweg mit einem Klick rückgängig.
+
+### Package
+
+Visual Studio Marketplace - [Auto Fix All Open](https://marketplace.visualstudio.com/items?itemName=DanielRoesch.auto-fix-all-open).
