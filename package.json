@@ -1,8 +1,8 @@
 {
   "name": "auto-fix-all-open",
   "displayName": "Auto Fix All Open",
-  "description": "Behebt alle automatisch behebbaren Probleme (inkl. spezieller Markdown-Regeln) in allen geöffneten Dateien, speichert diese direkt ab und bietet eine Rückgängig-Funktion.",
-  "version": "1.0.2",
+  "description": "Behebt alle automatisch behebbaren Probleme (inkl. unnötiger Typecasts und spezieller Markdown-Regeln) in allen geöffneten Dateien, speichert diese direkt ab und bietet eine Rückgängig-Funktion.",
+  "version": "1.0.3",
   "publisher": "DanielRoesch",
   "engines": {
     "vscode": "^1.85.0"
@@ -23,6 +23,12 @@
         "title": "Alle Probleme in offenen Dateien beheben & speichern",
         "category": "Auto-Fix All",
         "icon": "$(sparkle)"
+      },
+      {
+        "command": "auto-fix-all.removeUnnecessaryTypecasts",
+        "title": "Unnötige Typecasts in offenen Dateien entfernen",
+        "category": "Auto-Fix All",
+        "icon": "$(symbol-operator)"
       },
       {
         "command": "auto-fix-all.undoLastFix",
@@ -57,6 +63,9 @@
       "commandPalette": [
         {
           "command": "auto-fix-all.fixAllOpen"
+        },
+        {
+          "command": "auto-fix-all.removeUnnecessaryTypecasts"
         },
         {
           "command": "auto-fix-all.undoLastFix",
