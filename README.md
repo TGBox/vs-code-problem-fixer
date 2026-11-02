@@ -11,6 +11,7 @@ Speziell optimiert für durch KI-Agenten erstellte `.md` (Markdown)-Dateien!
   * **MD040 (Unlabeled Code Blocks):** Erkennt automatisch unmarkierte Codeblöcke und ergänzt `text` (bei Ordner-/Baumstrukturen wie `├──`, `└──`) oder `bash` (bei Konsolenbefehlen wie `npm`, `git`, `docker`, `cd`).
   * **MD025 (Multiple Top-Level Headings):** Wandelt ab der zweiten `#`-Überschrift im Dokument diese automatisch in `##` um.
   * **MD036 (Emphasis used as Heading):** Wandelt alleinstehende hervorgehobene Zeilen (`**Überschrift**`) automatisch in echte Überschriften (`## **Überschrift**`) um.
+  * **Fehlende Top-Level-Überschrift:** Besitzt eine Datei keine `#`-Überschrift, wird der Dateiname (ohne Endung, erster Buchstabe groß) als `# Titel` an den Anfang gesetzt – gefolgt von einer Leerzeile.
 * **Sicheres Undo-System:** Macht bei Bedarf den gesamten letzten Auto-Fix-Durchlauf über alle betroffenen Dateien hinweg mit einem Klick rückgängig.
 
 ### Package
