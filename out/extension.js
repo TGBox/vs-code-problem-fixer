@@ -88,6 +88,7 @@ async function runAutoFixOnAllOpenFiles() {
                 // - MD040: Codeblöcke ohne Sprache (Baumstruktur -> text, Befehle -> bash)
                 // - MD036: Emphasis used as heading (**Titel** -> ## **Titel**)
                 // - MD025: Doppelte Top-Level-Überschriften (# Titel -> ## Titel ab der 2. H1)
+                // - Fehlende H1: Dateiname (ohne Endung, erster Buchstabe groß) als '# Titel' einfügen
                 if (isMarkdown) {
                     await applyCustomMarkdownFixes(document);
                     await delay(80);
@@ -256,10 +257,12 @@ function getAllOpenTextDocumentUris() {
  * 1. MD040: Codeblöcke ohne Sprachkennzeichnung (`text` bei Bäumen, `bash` bei Konsolenbefehlen)
  * 2. MD036: Emphasis used instead of a heading (`## ` vor alleinstehende fett/kursiv Zeilen setzen)
  * 3. MD025: Multiple top-level headings in the same document (ab der 2. `# ` Überschrift ein `#` ergänzen -> `## `)
+ * 4. Fehlende Top-Level-Überschrift: Dateiname (ohne Endung, 1. Buchstabe groß) als `# Titel` einfügen
+ * 5. Text direkt unter einer Tabelle (ohne Leerzeile): Leerzeile einfügen (MD055/MD056/MD058)
  */
 async function applyCustomMarkdownFixes(document) {
     const originalText = document.getText();
-    const updatedText = processCustomMarkdownRules(originalText);
+    const updatedText = processCustomMarkdownRules(originalText, getHeadingTitleFromUri(document.uri));
     if (updatedText === originalText) {
         return false;
     }
@@ -269,10 +272,30 @@ async function applyCustomMarkdownFixes(document) {
     return await vscode.workspace.applyEdit(edit);
 }
 /**
- * Parst Zeilen eines Markdown-Texts und behebt MD040 (Codeblöcke), MD025 (Doppelte H1)
- * sowie MD036 (Emphasis als Überschrift).
+ * Ermittelt aus dem Dateinamen einen Titel für eine fehlende Top-Level-Überschrift:
+ * Dateiendung entfernen und den ersten Buchstaben großschreiben (z.B. "installation.md" -> "Installation").
+ * Für ungespeicherte Dokumente (untitled) gibt es keinen sinnvollen Dateinamen -> undefined.
  */
-function processCustomMarkdownRules(markdownText) {
+function getHeadingTitleFromUri(uri) {
+    if (uri.scheme !== 'file') {
+        return undefined;
+    }
+    const baseName = uri.fsPath.split(/[\\/]/).pop() || '';
+    const lastDot = baseName.lastIndexOf('.');
+    const nameWithoutExtension = (lastDot > 0 ? baseName.substring(0, lastDot) : baseName).trim();
+    if (nameWithoutExtension.length === 0) {
+        return undefined;
+    }
+    return nameWithoutExtension.charAt(0).toLocaleUpperCase() + nameWithoutExtension.substring(1);
+}
+/**
+ * Parst Zeilen eines Markdown-Texts und behebt MD040 (Codeblöcke), MD025 (Doppelte H1),
+ * MD036 (Emphasis als Überschrift) sowie eine komplett fehlende Top-Level-Überschrift.
+ *
+ * @param headingTitle Titel, der als `# Titel` eingefügt wird, falls das Dokument keine H1 besitzt.
+ *                     Ist er nicht gesetzt, wird keine Überschrift ergänzt.
+ */
+function processCustomMarkdownRules(markdownText, headingTitle) {
     const lines = markdownText.split(/\r?\n/);
     const lineBreak = markdownText.includes('\r\n') ? '\r\n' : '\n';
     let inCodeBlock = false;
@@ -282,7 +305,11 @@ function processCustomMarkdownRules(markdownText) {
     let isUnlabeledBlock = false;
     let blockLines = [];
     let inYamlFrontMatter = false;
+    let frontMatterEndIndex = -1;
     let seenTopLevelHeading = false;
+    let inTable = false;
+    // Zeilenindizes, vor denen nach dem Durchlauf eine Leerzeile eingefügt wird
+    const insertBlankLineBefore = [];
     // Falls im YAML Front-Matter bereits ein "title:" definiert ist, zählt markdownlint (MD025)
     // diesen oft schon als erste H1-Überschrift.
     for (let i = 0; i < lines.length; i++) {
@@ -298,8 +325,26 @@ function processCustomMarkdownRules(markdownText) {
             }
             if (line.trim() === '---' || line.trim() === '...') {
                 inYamlFrontMatter = false;
+                frontMatterEndIndex = i;
             }
             continue;
+        }
+        // 5. Tabellen-Ende: Eine nicht-leere Zeile ohne '|' direkt unter einer Tabelle wird von
+        // markdownlint als weitere Tabellenzeile mit nur einer Zelle gewertet (MD055 fehlende Pipes,
+        // MD056 zu wenige Spalten). Eine Leerzeile davor beendet die Tabelle korrekt.
+        if (!inCodeBlock) {
+            if (inTable) {
+                if (line.trim() === '') {
+                    inTable = false;
+                }
+                else if (!containsTablePipe(line)) {
+                    insertBlankLineBefore.push(i);
+                    inTable = false;
+                }
+            }
+            else if (containsTablePipe(line) && i + 1 < lines.length && isTableDelimiterRow(lines[i + 1])) {
+                inTable = true;
+            }
         }
         // 1. Codeblock-Verarbeitung (MD040)
         if (!inCodeBlock) {
@@ -348,6 +393,11 @@ function processCustomMarkdownRules(markdownText) {
             }
             continue;
         }
+        // Setext-H1 (Textzeile, darunter "====") zählt ebenfalls als Top-Level-Überschrift
+        if (/^\s*=+\s*$/.test(line) && i > 0 && lines[i - 1].trim() !== '' && i - 1 > frontMatterEndIndex) {
+            seenTopLevelHeading = true;
+            continue;
+        }
         // 3. MD036: Emphasis used instead of a heading
         // markdownlint meldet MD036, wenn ein einzeiliger Absatz (umgeben von Leerzeilen bzw. Dokumentanfang/-ende)
         // komplett aus **Text**, __Text__, *Text* oder _Text_ besteht und NICHT auf Satzzeichen (., !, ?, :, ;) endet.
@@ -368,7 +418,36 @@ function processCustomMarkdownRules(markdownText) {
             }
         }
     }
+    // 5. Gesammelte Leerzeilen von hinten nach vorne einfügen, damit die Indizes gültig bleiben
+    for (let k = insertBlankLineBefore.length - 1; k >= 0; k--) {
+        lines.splice(insertBlankLineBefore[k], 0, '');
+    }
+    // 4. Fehlende Top-Level-Überschrift: Dateiname als '# Titel' an den Anfang setzen
+    // (bei vorhandenem YAML Front-Matter direkt dahinter), darunter genau eine Leerzeile.
+    if (!seenTopLevelHeading && !inYamlFrontMatter && headingTitle) {
+        const head = lines.slice(0, frontMatterEndIndex + 1);
+        const rest = lines.slice(frontMatterEndIndex + 1);
+        // Führende Leerzeilen entfernen, damit zwischen Überschrift und Inhalt genau eine Leerzeile steht
+        while (rest.length > 0 && rest[0].trim() === '') {
+            rest.shift();
+        }
+        // '# Titel', eine Leerzeile, dann der restliche Inhalt (bei leerer Datei: Titel + Zeilenumbruch)
+        return [...head, `# ${headingTitle}`, '', ...rest].join(lineBreak);
+    }
     return lines.join(lineBreak);
+}
+/**
+ * Prüft, ob eine Zeile ein (nicht mit Backslash maskiertes) '|' enthält und damit als Tabellenzeile gilt.
+ */
+function containsTablePipe(line) {
+    return /(^|[^\\])\|/.test(line);
+}
+/**
+ * Prüft, ob eine Zeile eine Tabellen-Trennzeile ist, z.B. "| --- | :---: |" oder "---|---".
+ */
+function isTableDelimiterRow(line) {
+    return containsTablePipe(line)
+        && /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/.test(line);
 }
 /**
  * Heuristik zur Erkennung des Codeblock-Typs für unmarkierte Markdown-Blöcke:
