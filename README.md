@@ -6,7 +6,8 @@ Speziell optimiert für durch KI-Agenten erstellte `.md` (Markdown)-Dateien!
 
 ## Features
 
-* **Ein-Klick Multi-File Auto-Fix:** Führt `editor.action.fixAll` und `markdownlint.fixAll` (mehrstufig) auf allen offenen Dateien aus und speichert sie.
+* **Ein-Klick Multi-File Auto-Fix:** Führt `editor.action.fixAll`, ESLint-Autofix (`eslint.executeAutofix`) und `markdownlint.fixAll` (mehrstufig) auf allen offenen Dateien aus und speichert sie.
+* **Entfernung unnötiger Typecasts:** Entfernt überflüssige Typ-Assertions und Typecasts (z. B. via `@typescript-eslint/no-unnecessary-type-assertion`, Biome, Roslyn `IDE0004`, Sonar `S1905`, Dart `unnecessary_cast`) sowie syntaktisch redundante Casts (wie verkettete `expr as T as T`, `<T><T>expr`, `x!!` oder redundante Literal-Casts bei bereits typisierten Variablen) automatisch bei jedem Durchlauf oder über einen eigenen Befehl.
 * **Intelligente Markdown-Regelkorrektur:**
   * **MD040 (Unlabeled Code Blocks):** Erkennt automatisch unmarkierte Codeblöcke und ergänzt `text` (bei Ordner-/Baumstrukturen wie `├──`, `└──`) oder `bash` (bei Konsolenbefehlen wie `npm`, `git`, `docker`, `cd`).
   * **MD025 (Multiple Top-Level Headings):** Wandelt ab der zweiten `#`-Überschrift im Dokument diese automatisch in `##` um.

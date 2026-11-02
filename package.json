@@ -28,6 +28,12 @@
         "icon": "$(sparkle)"
       },
       {
+        "command": "auto-fix-all.removeUnnecessaryTypecasts",
+        "title": "Unnötige Typecasts in offenen Dateien entfernen",
+        "category": "Auto-Fix All",
+        "icon": "$(symbol-operator)"
+      },
+      {
         "command": "auto-fix-all.undoLastFix",
         "title": "Letzten Auto-Fix Durchlauf rückgängig machen",
         "category": "Auto-Fix All",
@@ -60,6 +66,9 @@
       "commandPalette": [
         {
           "command": "auto-fix-all.fixAllOpen"
+        },
+        {
+          "command": "auto-fix-all.removeUnnecessaryTypecasts"
         },
         {
           "command": "auto-fix-all.undoLastFix",
