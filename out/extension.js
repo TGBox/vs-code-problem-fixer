@@ -242,6 +242,7 @@ function getAllOpenTextDocumentUris() {
  * 2. MD036: Emphasis used instead of a heading (`## ` vor alleinstehende fett/kursiv Zeilen setzen)
  * 3. MD025: Multiple top-level headings in the same document (ab der 2. `# ` Überschrift ein `#` ergänzen -> `## `)
  * 4. Fehlende Top-Level-Überschrift: Dateiname (ohne Endung, 1. Buchstabe groß) als `# Titel` einfügen
+ * 5. Text direkt unter einer Tabelle (ohne Leerzeile): Leerzeile einfügen (MD055/MD056/MD058)
  */
 async function applyCustomMarkdownFixes(document) {
     const originalText = document.getText();
@@ -290,6 +291,9 @@ function processCustomMarkdownRules(markdownText, headingTitle) {
     let inYamlFrontMatter = false;
     let frontMatterEndIndex = -1;
     let seenTopLevelHeading = false;
+    let inTable = false;
+    // Zeilenindizes, vor denen nach dem Durchlauf eine Leerzeile eingefügt wird
+    const insertBlankLineBefore = [];
     // Falls im YAML Front-Matter bereits ein "title:" definiert ist, zählt markdownlint (MD025)
     // diesen oft schon als erste H1-Überschrift.
     for (let i = 0; i < lines.length; i++) {
@@ -308,6 +312,23 @@ function processCustomMarkdownRules(markdownText, headingTitle) {
                 frontMatterEndIndex = i;
             }
             continue;
+        }
+        // 5. Tabellen-Ende: Eine nicht-leere Zeile ohne '|' direkt unter einer Tabelle wird von
+        // markdownlint als weitere Tabellenzeile mit nur einer Zelle gewertet (MD055 fehlende Pipes,
+        // MD056 zu wenige Spalten). Eine Leerzeile davor beendet die Tabelle korrekt.
+        if (!inCodeBlock) {
+            if (inTable) {
+                if (line.trim() === '') {
+                    inTable = false;
+                }
+                else if (!containsTablePipe(line)) {
+                    insertBlankLineBefore.push(i);
+                    inTable = false;
+                }
+            }
+            else if (containsTablePipe(line) && i + 1 < lines.length && isTableDelimiterRow(lines[i + 1])) {
+                inTable = true;
+            }
         }
         // 1. Codeblock-Verarbeitung (MD040)
         if (!inCodeBlock) {
@@ -381,6 +402,10 @@ function processCustomMarkdownRules(markdownText, headingTitle) {
             }
         }
     }
+    // 5. Gesammelte Leerzeilen von hinten nach vorne einfügen, damit die Indizes gültig bleiben
+    for (let k = insertBlankLineBefore.length - 1; k >= 0; k--) {
+        lines.splice(insertBlankLineBefore[k], 0, '');
+    }
     // 4. Fehlende Top-Level-Überschrift: Dateiname als '# Titel' an den Anfang setzen
     // (bei vorhandenem YAML Front-Matter direkt dahinter), darunter genau eine Leerzeile.
     if (!seenTopLevelHeading && !inYamlFrontMatter && headingTitle) {
@@ -394,6 +419,19 @@ function processCustomMarkdownRules(markdownText, headingTitle) {
         return [...head, `# ${headingTitle}`, '', ...rest].join(lineBreak);
     }
     return lines.join(lineBreak);
+}
+/**
+ * Prüft, ob eine Zeile ein (nicht mit Backslash maskiertes) '|' enthält und damit als Tabellenzeile gilt.
+ */
+function containsTablePipe(line) {
+    return /(^|[^\\])\|/.test(line);
+}
+/**
+ * Prüft, ob eine Zeile eine Tabellen-Trennzeile ist, z.B. "| --- | :---: |" oder "---|---".
+ */
+function isTableDelimiterRow(line) {
+    return containsTablePipe(line)
+        && /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/.test(line);
 }
 /**
  * Heuristik zur Erkennung des Codeblock-Typs für unmarkierte Markdown-Blöcke:
