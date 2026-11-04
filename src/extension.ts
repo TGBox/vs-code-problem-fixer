@@ -1,4 +1,9 @@
 import * as vscode from 'vscode';
+import {
+    fixIdentityComparisonsInText,
+    IdentityComparisonTarget,
+    isIdentityComparisonDiagnostic
+} from './pythonIdentityFixes';
 
 /**
  * Interface zur Speicherung eines Dateizustands vor der Änderung (für das Undo-System)
@@ -99,6 +104,7 @@ async function runAutoFixOnAllOpenFiles(): Promise<void> {
 
                     const originalContent = document.getText();
                     const isMarkdown = document.languageId === 'markdown' || uri.fsPath.toLowerCase().endsWith('.md');
+                    const isPython = document.languageId === 'python' || uri.fsPath.toLowerCase().endsWith('.py');
 
                     // Schritt A: Dokument im Editor fokussieren, damit 'editor.action.fixAll'
                     // und 'markdownlint.fixAll' zuverlässig auf diesem Dokument arbeiten können.
@@ -117,6 +123,15 @@ async function runAutoFixOnAllOpenFiles(): Promise<void> {
                     // - Fehlende H1: Dateiname (ohne Endung, erster Buchstabe groß) als '# Titel' einfügen
                     if (isMarkdown) {
                         await applyCustomMarkdownFixes(document);
+                        await delay(80);
+                    }
+
+                    // Schritt B2: Python – Identitätsvergleiche, die laut Analyzer immer True/False sind
+                    // ("Identity comparison `False is True` is always False"): `x is True` -> `x`,
+                    // `x is False` -> `not x`. Läuft bewusst nur einmal und VOR allen anderen Edits,
+                    // da die Positionen der Diagnosen danach nicht mehr zum Text passen würden.
+                    if (isPython) {
+                        await applyPythonIdentityComparisonFixes(document);
                         await delay(80);
                     }
 
@@ -313,6 +328,51 @@ function getAllOpenTextDocumentUris(): vscode.Uri[] {
 async function applyCustomMarkdownFixes(document: vscode.TextDocument): Promise<boolean> {
     const originalText = document.getText();
     const updatedText = processCustomMarkdownRules(originalText, getHeadingTitleFromUri(document.uri));
+
+    if (updatedText === originalText) {
+        return false;
+    }
+
+    const fullRange = new vscode.Range(
+        document.positionAt(0),
+        document.positionAt(originalText.length)
+    );
+
+    const edit = new vscode.WorkspaceEdit();
+    edit.replace(document.uri, fullRange, updatedText);
+    return await vscode.workspace.applyEdit(edit);
+}
+
+/**
+ * Liest die aktuellen Diagnosen eines Python-Dokuments und behebt alle gemeldeten
+ * "Identity comparison ... is always True/False"-Stellen. Es werden ausschließlich gemeldete
+ * Stellen angefasst, da `x is True` bei Nicht-bool-Werten nicht gleichbedeutend mit `x` ist.
+ */
+async function applyPythonIdentityComparisonFixes(document: vscode.TextDocument): Promise<boolean> {
+    const config = vscode.workspace.getConfiguration('autoFixAll.python');
+    if (!config.get<boolean>('fixIdentityComparisons', true)) {
+        return false;
+    }
+
+    const targets: IdentityComparisonTarget[] = vscode.languages.getDiagnostics(document.uri)
+        .filter(d => isIdentityComparisonDiagnostic(d.message))
+        .map(d => ({
+            line: d.range.start.line,
+            startChar: d.range.start.character,
+            // Mehrzeilige Bereiche: bis zum Ende der Startzeile suchen
+            endChar: d.range.end.line === d.range.start.line
+                ? d.range.end.character
+                : document.lineAt(d.range.start.line).text.length
+        }));
+
+    if (targets.length === 0) {
+        return false;
+    }
+
+    const originalText = document.getText();
+    const { text: updatedText } = fixIdentityComparisonsInText(originalText, targets, {
+        splitAssertions: config.get<boolean>('splitAssertions', true)
+    });
 
     if (updatedText === originalText) {
         return false;

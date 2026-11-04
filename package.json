@@ -1,8 +1,8 @@
 {
   "name": "auto-fix-all-open",
   "displayName": "Auto Fix All Open",
-  "description": "Behebt alle automatisch behebbaren Probleme (inkl. spezieller Markdown-Regeln) in allen geöffneten Dateien, speichert diese direkt ab und bietet eine Rückgängig-Funktion.",
-  "version": "1.1.4",
+  "description": "Behebt alle automatisch behebbaren Probleme (inkl. spezieller Markdown- und Python-Regeln) in allen geöffneten Dateien, speichert diese direkt ab und bietet eine Rückgängig-Funktion.",
+  "version": "1.2.0",
   "repository": {
     "url": "https://www.github.com/TGBox/vs-code-problem-fixer"
   },
@@ -66,6 +66,21 @@
           "when": "autoFixAll.canUndo"
         }
       ]
+    },
+    "configuration": {
+      "title": "Auto Fix All Open",
+      "properties": {
+        "autoFixAll.python.fixIdentityComparisons": {
+          "type": "boolean",
+          "default": true,
+          "description": "Python: Vom Analyzer gemeldete Identitätsvergleiche, die immer True/False ergeben (z.B. \"Identity comparison `False is True` is always False\"), automatisch umschreiben: `x is True` -> `x`, `x is False` -> `not x`."
+        },
+        "autoFixAll.python.splitAssertions": {
+          "type": "boolean",
+          "default": true,
+          "description": "Python: Betroffene `assert a and b`-Zeilen in einzelne assert-Zeilen aufteilen, damit pytest bei Fehlschlägen den konkreten Teilausdruck anzeigt."
+        }
+      }
     }
   },
   "scripts": {
