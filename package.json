@@ -1,8 +1,8 @@
 {
   "name": "auto-fix-all-open",
   "displayName": "Auto Fix All Open",
-  "description": "Behebt alle automatisch behebbaren Probleme (inkl. spezieller Markdown- und Python-Regeln) in allen geöffneten Dateien, speichert diese direkt ab und bietet eine Rückgängig-Funktion.",
-  "version": "1.2.0",
+  "description": "Behebt alle automatisch behebbaren Probleme (inkl. spezieller Regeln für Markdown, Python, JSON, YAML, Shell, TOML, SVG und SQL) in allen geöffneten Dateien, speichert diese direkt ab und bietet eine Rückgängig-Funktion.",
+  "version": "1.3.0",
   "repository": {
     "url": "https://www.github.com/TGBox/vs-code-problem-fixer"
   },
@@ -88,6 +88,36 @@
           "type": "boolean",
           "default": true,
           "description": "Python: Betroffene `assert a and b`-Zeilen in einzelne assert-Zeilen aufteilen, damit pytest bei Fehlschlägen den konkreten Teilausdruck anzeigt."
+        },
+        "autoFixAll.json.fixTrailingCommas": {
+          "type": "boolean",
+          "default": true,
+          "description": "JSON: Trailing-Commas entfernen und einfache Anführungszeichen oder ungültige Kommentare reparieren."
+        },
+        "autoFixAll.yaml.fixTabs": {
+          "type": "boolean",
+          "default": true,
+          "description": "YAML: Unzulässige Tabs in der Einrückung durch 2 Leerzeichen ersetzen und nachfolgende Leerzeichen entfernen."
+        },
+        "autoFixAll.shell.normalizeLineEndings": {
+          "type": "boolean",
+          "default": true,
+          "description": "Shell-Skripte: Windows CRLF-Zeilenumbrüche automatisch zu Linux LF konvertieren und führende Leerzeilen vor dem Shebang (#!) entfernen."
+        },
+        "autoFixAll.toml.deduplicateSections": {
+          "type": "boolean",
+          "default": true,
+          "description": "TOML: Doppelte Tabellen-Sektionen (z. B. versehentlich mehrfach deklariertes [project] oder [tool.ruff]) zusammenführen."
+        },
+        "autoFixAll.svg.fixSelfClosingTags": {
+          "type": "boolean",
+          "default": true,
+          "description": "SVG/XML: Nicht geschlossene Void-Tags (<path>, <circle>, <rect> usw.) automatisch als selbstschließend (<... />) formatieren."
+        },
+        "autoFixAll.sql.fixTrailingSemicolons": {
+          "type": "boolean",
+          "default": true,
+          "description": "SQL: Fehlende abschließende Semikolons (;) an Statement-Enden automatisch ergänzen."
         }
       }
     }

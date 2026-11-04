@@ -4,6 +4,7 @@ import {
     IdentityComparisonTarget,
     isIdentityComparisonDiagnostic
 } from './pythonIdentityFixes';
+import { applyCustomFormatFixes } from './aiFormatFixers';
 
 /**
  * Interface zur Speicherung eines Dateizustands vor der Änderung (für das Undo-System)
@@ -34,7 +35,7 @@ export function activate(context: vscode.ExtensionContext) {
     fixStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 10000);
     fixStatusBarItem.command = 'auto-fix-all.fixAllOpen';
     fixStatusBarItem.text = '$(sparkle) Auto-Fix All';
-    fixStatusBarItem.tooltip = 'Behebt alle automatisch lösbaren Probleme, unnötige Typecasts & Markdown-Fehler in offenen Dateien und speichert diese.';
+    fixStatusBarItem.tooltip = 'Behebt alle automatisch lösbaren Probleme, KI-Formatfehler (Markdown, Python, JSON, YAML, Shell, TOML, SVG, SQL) & unnötige Typecasts in offenen Dateien.';
     fixStatusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.prominentBackground');
     fixStatusBarItem.show();
 
@@ -141,6 +142,10 @@ async function runAutoFixOnAllOpenFiles(): Promise<void> {
                         await delay(80);
                     }
 
+                    // Schritt B3: Format-spezifische KI-Regeln anwenden (JSON, YAML, Shell, TOML, SVG/XML, SQL)
+                    await applyCustomFormatFixes(document);
+                    await delay(80);
+
                     // Schritt C: Mehrstufiger Auto-Fix-Durchlauf (bis zu 3 Runden),
                     // da manche Linter-Regeln erst nach dem ersten Fix neue Folge-Fixes freischalten.
                     const allCommands = await vscode.commands.getCommands(true);
@@ -173,6 +178,9 @@ async function runAutoFixOnAllOpenFiles(): Promise<void> {
 
                         // 4. Unnötige Typecasts entfernen
                         await removeUnnecessaryTypecastsFromDocument(document);
+
+                        // 5. Format-spezifische KI-Fixes erneut anwenden
+                        await applyCustomFormatFixes(document);
 
                         // Kurz warten, damit Edits angewendet und neue Diagnostics berechnet werden
                         await delay(120);

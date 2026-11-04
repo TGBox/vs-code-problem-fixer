@@ -16,6 +16,13 @@ Speziell optimiert für durch KI-Agenten erstellte `.md` (Markdown)-Dateien!
 * **Python: Identitätsvergleiche, die immer True/False ergeben:** Meldet ein Analyzer z.B. ``Identity comparison `False is True` is always False``, wird die betroffene Stelle PEP-8-konform umgeschrieben: `x is True` → `x`, `x is False` → `not x` (ebenso `is not True/False` und `True is x`). Es werden ausschließlich gemeldete Stellen angepasst – nicht pauschal jedes `is True` in der Datei.
   * Betroffene `assert a and b`-Zeilen werden zusätzlich in einzelne `assert`-Zeilen aufgeteilt, damit pytest bei Fehlschlägen den konkreten Teilausdruck anzeigt.
   * Abschaltbar über die Einstellungen `autoFixAll.python.fixIdentityComparisons` und `autoFixAll.python.splitAssertions`.
+* **Spezielle KI-Format-Fixer für Coding-Agents:**
+  * **JSON:** Entfernt automatisch ungültige Trailing-Commas (`[1, 2, 3,]` $\rightarrow$ `[1, 2, 3]`), repariert einfache Anführungszeichen in Keys/Strings (`'name'` $\rightarrow$ `"name"`) und bereinigt ungültige Inline-Kommentare.
+  * **YAML:** Ersetzt unzulässige Tabs in der Einrückung durch 2 Leerzeichen und schneidet überflüssigen Trailing-Whitespace ab.
+  * **Shell-Skripte (`.sh`, `.bash`):** Konvertiert Windows-CRLF-Zeilenumbrüche automatisch zu Linux-LF (verhindert den berüchtigten `\r: command not found`-Fehler in Containern/Linux) und rückt Shebang-Zeilen (`#!`) an Zeile 1.
+  * **TOML (`pyproject.toml`, `Cargo.toml`):** Führt versehentlich von KIs doppelt angehängte Tabellen-Sektionen (wie doppelte `[project]` oder `[tool.ruff]`) sauber zusammen.
+  * **SVG & XML:** Formatiert nicht geschlossene Void-Elemente (`<path ...>`, `<circle ...>` etc.) automatisch als selbstschließend (`<... />`).
+  * **SQL:** Ergänzt fehlende abschließende Semikolons (`;`) an Statement-Enden.
 * **Sicheres Undo-System:** Macht bei Bedarf den gesamten letzten Auto-Fix-Durchlauf über alle betroffenen Dateien hinweg mit einem Klick rückgängig.
 
 ### Package

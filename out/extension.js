@@ -4,6 +4,7 @@ exports.activate = activate;
 exports.deactivate = deactivate;
 const vscode = require("vscode");
 const pythonIdentityFixes_1 = require("./pythonIdentityFixes");
+const aiFormatFixers_1 = require("./aiFormatFixers");
 /**
  * Globaler Stack für Rückgängig-Operationen (speichert Snapshots pro Durchlauf)
  */
@@ -21,7 +22,7 @@ function activate(context) {
     fixStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 10000);
     fixStatusBarItem.command = 'auto-fix-all.fixAllOpen';
     fixStatusBarItem.text = '$(sparkle) Auto-Fix All';
-    fixStatusBarItem.tooltip = 'Behebt alle automatisch lösbaren Probleme, unnötige Typecasts & Markdown-Fehler in offenen Dateien und speichert diese.';
+    fixStatusBarItem.tooltip = 'Behebt alle automatisch lösbaren Probleme, KI-Formatfehler (Markdown, Python, JSON, YAML, Shell, TOML, SVG, SQL) & unnötige Typecasts in offenen Dateien.';
     fixStatusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.prominentBackground');
     fixStatusBarItem.show();
     // 2. Statusleisten-Button für Undo (wird nur angezeigt, wenn ein Backup existiert)
@@ -103,6 +104,9 @@ async function runAutoFixOnAllOpenFiles() {
                     await applyPythonIdentityComparisonFixes(document);
                     await delay(80);
                 }
+                // Schritt B3: Format-spezifische KI-Regeln anwenden (JSON, YAML, Shell, TOML, SVG/XML, SQL)
+                await (0, aiFormatFixers_1.applyCustomFormatFixes)(document);
+                await delay(80);
                 // Schritt C: Mehrstufiger Auto-Fix-Durchlauf (bis zu 3 Runden),
                 // da manche Linter-Regeln erst nach dem ersten Fix neue Folge-Fixes freischalten.
                 const allCommands = await vscode.commands.getCommands(true);
@@ -132,6 +136,8 @@ async function runAutoFixOnAllOpenFiles() {
                     }
                     // 4. Unnötige Typecasts entfernen
                     await removeUnnecessaryTypecastsFromDocument(document);
+                    // 5. Format-spezifische KI-Fixes erneut anwenden
+                    await (0, aiFormatFixers_1.applyCustomFormatFixes)(document);
                     // Kurz warten, damit Edits angewendet und neue Diagnostics berechnet werden
                     await delay(120);
                     if (isMarkdown) {
