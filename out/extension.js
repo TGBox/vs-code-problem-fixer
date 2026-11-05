@@ -300,7 +300,7 @@ async function applyPythonIdentityComparisonFixes(document) {
         return false;
     }
     const targets = vscode.languages.getDiagnostics(document.uri)
-        .filter(d => (0, pythonIdentityFixes_1.isIdentityComparisonDiagnostic)(d.message))
+        .filter(d => (0, pythonIdentityFixes_1.isIdentityComparisonDiagnostic)(d.message, typeof d.code === 'object' && d.code !== null ? String(d.code.value) : String(d.code ?? '')))
         .map(d => ({
         line: d.range.start.line,
         startChar: d.range.start.character,
@@ -708,6 +708,11 @@ async function removeUnnecessaryTypecastsFromDocument(document) {
     // 3. Python unnecessary typecasts and type conversions (Pyrefly, Pylance, Ruff, etc.)
     const isPython = document.languageId === 'python' || /\.py$/i.test(document.uri.fsPath);
     if (isPython) {
+        const idFixed = await applyPythonIdentityComparisonFixes(document);
+        if (idFixed) {
+            changed = true;
+            await delay(80);
+        }
         const pythonFixed = await applyPythonTypecastFixes(document);
         if (pythonFixed) {
             changed = true;

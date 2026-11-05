@@ -30,8 +30,13 @@ exports.splitAssertLine = splitAssertLine;
  * Bewusst über den Meldungstext statt über die Quelle (Pylance, SonarLint, ...), damit es
  * unabhängig vom meldenden Werkzeug funktioniert.
  */
-function isIdentityComparisonDiagnostic(message) {
-    return /identity comparison/i.test(message) && /\bis always (true|false)\b/i.test(message);
+function isIdentityComparisonDiagnostic(message, code) {
+    const lowerCode = (code ?? '').toLowerCase();
+    if (lowerCode === 'unnecessary-comparison' || lowerCode === 'unnecessary_comparison') {
+        return true;
+    }
+    return (/identity comparison/i.test(message) || /comparison/i.test(message)) &&
+        /\bis always (true|false)\b/i.test(message);
 }
 const IDENT_CHAR = /[A-Za-z0-9_]/;
 const OPENING = { ')': '(', ']': '[', '}': '{' };
@@ -128,7 +133,7 @@ function findComparisonsInSpan(line, from, to, stringMask) {
     while ((match = isRegex.exec(line)) !== null) {
         const isStart = match.index;
         const isEnd = isStart + match[0].length;
-        if (isStart < from || isStart >= to || stringMask[isStart]) {
+        if (stringMask[isStart]) {
             continue;
         }
         const negated = match[1] !== undefined;
@@ -162,7 +167,12 @@ function findComparisonsInSpan(line, from, to, stringMask) {
         else {
             continue;
         }
-        // Ein Literal mit einem Literal vergleichen (z.B. `True is True`) lassen wir in Ruhe –
+        // Der gefundene Vergleich [exprStart, exprEnd] muss den gemeldeten Bereich [from, to] abdecken oder überlappen
+        const overlaps = Math.max(from, exprStart) <= Math.min(to, exprEnd);
+        const near = Math.abs(from - exprStart) <= 5 || Math.abs(to - exprEnd) <= 5;
+        if (!overlaps && !near) {
+            continue;
+        }
         // das ist kein Muster, das sich sinnvoll automatisch umschreiben lässt.
         if (operand === 'True' || operand === 'False' || KEYWORDS.has(operand)) {
             continue;
