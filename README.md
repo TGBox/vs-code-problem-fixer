@@ -10,6 +10,10 @@ Speziell optimiert für durch KI-Agenten erstellte `.md` (Markdown)-Dateien!
 * **Entfernung unnötiger Typecasts:** Entfernt überflüssige Typ-Assertions, Typecasts und Typkonvertierungen (z. B. via `@typescript-eslint/no-unnecessary-type-assertion`, Biome, Roslyn `IDE0004`, Sonar `S1905`, Dart `unnecessary_cast`, Pyrefly `unnecessary-type-conversion` / `redundant-cast`, Ruff) sowie syntaktisch redundante Casts (wie verkettete `expr as T as T`, `<T><T>expr`, `x!!`, Python `bool(x)`, `str(x)`, `int(x)`, `float(x)`, `typing.cast(T, x)` oder redundante Literal-Casts bei bereits typisierten Variablen) automatisch bei jedem Durchlauf oder über einen eigenen Befehl.
 * **Intelligente Markdown-Regelkorrektur:**
   * **MD040 (Unlabeled Code Blocks):** Erkennt automatisch unmarkierte Codeblöcke und ergänzt `text` (bei Ordner-/Baumstrukturen wie `├──`, `└──`) oder `bash` (bei Konsolenbefehlen wie `npm`, `git`, `docker`, `cd`).
+  * **MD031 (Blanks around fences):** Stellt sicher, dass Codeblöcke vor und nach den Fences (` ``` `) von Leerzeilen umgeben sind.
+  * **MD001 (Heading Increments):** Korrigiert zu große Sprünge in der Überschriften-Hierarchie (z. B. H1 gefolgt von H4 $\rightarrow$ H2), sodass Überschriften maximal um 1 steigen.
+  * **MD024 (Duplicate Headings):** Entfernt leere Überschriftenzeilen (`####`) und nummeriert doppelte Überschriftentitel automatisch (`Titel (2)`, `Titel (3)`).
+  * **MD033 (Inline HTML):** Erkennt nicht-standardmäßige HTML-Pseudo-Tags im Fließtext (z. B. `<undefined>`, `<T>`) und wandelt sie in Inline-Code-Spans (`` `<undefined>` ``) um.
   * **MD025 (Multiple Top-Level Headings):** Wandelt ab der zweiten `#`-Überschrift im Dokument diese automatisch in `##` um.
   * **MD036 (Emphasis used as Heading):** Wandelt alleinstehende hervorgehobene Zeilen (`**Überschrift**`) automatisch in echte Überschriften (`## **Überschrift**`) um.
   * **Fehlende Top-Level-Überschrift:** Besitzt eine Datei keine `#`-Überschrift, wird der Dateiname (ohne Endung, erster Buchstabe groß) als `# Titel` an den Anfang gesetzt – gefolgt von einer Leerzeile.

@@ -490,8 +490,16 @@ function getHeadingTitleFromUri(uri: vscode.Uri): string | undefined {
 }
 
 /**
- * Parst Zeilen eines Markdown-Texts und behebt MD040 (Codeblöcke), MD025 (Doppelte H1),
- * MD036 (Emphasis als Überschrift) sowie eine komplett fehlende Top-Level-Überschrift.
+ * Parst Zeilen eines Markdown-Texts und behebt:
+ * - MD040: Codeblöcke ohne Sprache (Baumstruktur -> text, Befehle -> bash)
+ * - MD031: Codeblöcke ohne umgebende Leerzeilen
+ * - MD025: Doppelte Top-Level-Überschriften (# -> ## ab der 2. H1)
+ * - MD001: Ungültige Heading-Inkremente (z.B. Sprung von H1 auf H4)
+ * - MD024: Doppelte und leere Überschriften (z.B. '####' ohne Text oder mehrfache identische Titel)
+ * - MD036: Emphasis als Überschrift
+ * - MD033: Inline-HTML-Pseudo-Tags (z.B. unmaskiertes <undefined>, <T> im Fließtext)
+ * - MD012: Mehrfache aufeinanderfolgende Leerzeilen
+ * - Fehlende Top-Level-Überschrift: Dateiname als '# Titel'
  *
  * @param headingTitle Titel, der als `# Titel` eingefügt wird, falls das Dokument keine H1 besitzt.
  *                     Ist er nicht gesetzt, wird keine Überschrift ergänzt.
@@ -510,19 +518,38 @@ function processCustomMarkdownRules(markdownText: string, headingTitle?: string)
     let inYamlFrontMatter = false;
     let frontMatterEndIndex = -1;
     let seenTopLevelHeading = false;
+    let prevHeadingLevel = 0;
+    const seenHeadingsCount = new Map<string, number>();
 
     let inTable = false;
-    // Zeilenindizes, vor denen nach dem Durchlauf eine Leerzeile eingefügt wird
-    const insertBlankLineBefore: number[] = [];
 
-    // Falls im YAML Front-Matter bereits ein "title:" definiert ist, zählt markdownlint (MD025)
-    // diesen oft schon als erste H1-Überschrift.
+    const standardHtmlTags = /^(a|abbr|b|blockquote|br|code|dd|del|details|dfn|div|dl|dt|em|h[1-6]|hr|i|img|ins|kbd|li|ol|p|pre|q|s|samp|small|span|strong|sub|sup|summary|table|tbody|td|tfoot|th|thead|tr|u|ul|var|wbr|\/.*)$/i;
+
+    function fixInlinePseudoHtml(text: string): string {
+        const parts = text.split(/(`+[^`]+`+)/);
+        for (let p = 0; p < parts.length; p++) {
+            if (parts[p].startsWith('`')) {
+                continue;
+            }
+            parts[p] = parts[p].replace(/<([A-Za-z0-9_-]+)>/g, (match, tag) => {
+                if (!standardHtmlTags.test(tag)) {
+                    return `\`<${tag}>\``;
+                }
+                return match;
+            });
+        }
+        return parts.join('');
+    }
+
+    const output: string[] = [];
+
     for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
+        let line = lines[i];
 
         // 0. YAML Front-Matter am Dateianfang überspringen (und auf title: prüfen)
         if (i === 0 && line.trim() === '---') {
             inYamlFrontMatter = true;
+            output.push(line);
             continue;
         }
         if (inYamlFrontMatter) {
@@ -531,20 +558,21 @@ function processCustomMarkdownRules(markdownText: string, headingTitle?: string)
             }
             if (line.trim() === '---' || line.trim() === '...') {
                 inYamlFrontMatter = false;
-                frontMatterEndIndex = i;
+                frontMatterEndIndex = output.length;
             }
+            output.push(line);
             continue;
         }
 
-        // 5. Tabellen-Ende: Eine nicht-leere Zeile ohne '|' direkt unter einer Tabelle wird von
-        // markdownlint als weitere Tabellenzeile mit nur einer Zelle gewertet (MD055 fehlende Pipes,
-        // MD056 zu wenige Spalten). Eine Leerzeile davor beendet die Tabelle korrekt.
+        // 5. Tabellen-Ende prüfen
         if (!inCodeBlock) {
             if (inTable) {
                 if (line.trim() === '') {
                     inTable = false;
                 } else if (!containsTablePipe(line)) {
-                    insertBlankLineBefore.push(i);
+                    if (output.length > 0 && output[output.length - 1].trim() !== '') {
+                        output.push('');
+                    }
                     inTable = false;
                 }
             } else if (containsTablePipe(line) && i + 1 < lines.length && isTableDelimiterRow(lines[i + 1])) {
@@ -552,7 +580,7 @@ function processCustomMarkdownRules(markdownText: string, headingTitle?: string)
             }
         }
 
-        // 1. Codeblock-Verarbeitung (MD040)
+        // 1. Codeblock-Verarbeitung (MD040 & MD031)
         if (!inCodeBlock) {
             const openMatch = line.match(/^(\s*)(`{3,}|~{3,})(.*)$/);
             if (openMatch) {
@@ -561,9 +589,15 @@ function processCustomMarkdownRules(markdownText: string, headingTitle?: string)
                 currentFenceLength = openMatch[2].length;
                 const infoString = openMatch[3].trim();
 
-                openingLineIndex = i;
+                // MD031: Leerzeile vor Codeblock sicherstellen
+                if (output.length > 0 && output[output.length - 1].trim() !== '') {
+                    output.push('');
+                }
+
+                openingLineIndex = output.length;
                 isUnlabeledBlock = infoString.length === 0;
                 blockLines = [];
+                output.push(line);
                 continue;
             }
         } else {
@@ -571,7 +605,7 @@ function processCustomMarkdownRules(markdownText: string, headingTitle?: string)
             if (closeRegex.test(line)) {
                 if (isUnlabeledBlock && openingLineIndex !== -1) {
                     const inferredLang = inferCodeBlockLanguage(blockLines);
-                    lines[openingLineIndex] = lines[openingLineIndex].replace(
+                    output[openingLineIndex] = output[openingLineIndex].replace(
                         /^(\s*)(`{3,}|~{3,})\s*$/,
                         `$1$2${inferredLang}`
                     );
@@ -581,79 +615,123 @@ function processCustomMarkdownRules(markdownText: string, headingTitle?: string)
                 openingLineIndex = -1;
                 isUnlabeledBlock = false;
                 blockLines = [];
+                output.push(line);
+
+                // MD031: Leerzeile nach Codeblock sicherstellen
+                if (i + 1 < lines.length && lines[i + 1].trim() !== '') {
+                    output.push('');
+                }
+                continue;
             } else if (isUnlabeledBlock) {
                 blockLines.push(line);
             }
+            output.push(line);
             continue;
         }
 
         // =====================================================================
-        // Außerhalb von Codeblöcken: MD025 & MD036 prüfen
+        // Außerhalb von Codeblöcken
         // =====================================================================
 
-        // 2. MD025: Doppelte Top-Level-Heading (# Überschrift)
-        // Prüft auf Zeilen, die mit genau einem '#' gefolgt von Leerzeichen beginnen
-        const h1Match = line.match(/^(\s*)#(\s+.*)$/);
-        if (h1Match) {
-            if (!seenTopLevelHeading) {
-                seenTopLevelHeading = true;
-            } else {
-                // Zweite (oder weitere) Top-Level-Überschrift gefunden -> '#' direkt dahinter einfügen (wird zu '##')
-                lines[i] = `${h1Match[1]}##${h1Match[2]}`;
+        // Leere Überschriften entfernen (z.B. '####' ohne Text -> behebt MD024)
+        if (/^\s*#{1,6}\s*$/.test(line)) {
+            continue;
+        }
+
+        // Aider/KI-Artefakte: Überschrift-Hashes vor Listenelementen oder verschachtelten Headings entfernen
+        line = line.replace(/^\s*#{1,6}\s+(#{1,6}\s+.*)$/, '$1');
+        line = line.replace(/^\s*#{1,6}\s+([-*+]\s+.*)$/, '$1');
+        line = line.replace(/^\s*#{1,6}\s+(\d+\.\s+.*)$/, '$1');
+
+        // Überschriften-Logik: MD025, MD001, MD024
+        const headingMatch = line.match(/^(\s*)(#{1,6})(\s+.*)$/);
+        if (headingMatch) {
+            const indent = headingMatch[1];
+            let level = headingMatch[2].length;
+            let title = headingMatch[3].trim();
+
+            // MD025: Mehrfache H1 ab der zweiten in H2 umwandeln
+            if (level === 1) {
+                if (!seenTopLevelHeading) {
+                    seenTopLevelHeading = true;
+                } else {
+                    level = 2;
+                }
             }
+
+            // MD001: Heading-Ebene darf maximal um 1 steigen
+            if (prevHeadingLevel > 0 && level > prevHeadingLevel + 1) {
+                level = prevHeadingLevel + 1;
+            }
+            prevHeadingLevel = level;
+
+            // MD024: Doppelte Überschriftstitel eindeutig nummerieren
+            const normalizedTitle = title.toLowerCase();
+            const count = (seenHeadingsCount.get(normalizedTitle) || 0) + 1;
+            seenHeadingsCount.set(normalizedTitle, count);
+
+            if (count > 1) {
+                title = `${title} (${count})`;
+            }
+
+            line = `${indent}${'#'.repeat(level)} ${title}`;
+            output.push(line);
             continue;
         }
 
-        // Setext-H1 (Textzeile, darunter "====") zählt ebenfalls als Top-Level-Überschrift
-        if (/^\s*=+\s*$/.test(line) && i > 0 && lines[i - 1].trim() !== '' && i - 1 > frontMatterEndIndex) {
+        // Setext-H1 (Textzeile, darunter "====")
+        if (/^\s*=+\s*$/.test(line) && output.length > 0 && output[output.length - 1].trim() !== '' && output.length - 1 > frontMatterEndIndex) {
             seenTopLevelHeading = true;
+            prevHeadingLevel = 1;
+            output.push(line);
             continue;
         }
 
-        // 3. MD036: Emphasis used instead of a heading
-        // markdownlint meldet MD036, wenn ein einzeiliger Absatz (umgeben von Leerzeilen bzw. Dokumentanfang/-ende)
-        // komplett aus **Text**, __Text__, *Text* oder _Text_ besteht und NICHT auf Satzzeichen (., !, ?, :, ;) endet.
-        const prevLineEmpty = (i === 0) || (lines[i - 1].trim() === '');
+        // MD036: Emphasis used instead of a heading
+        const prevLineEmpty = (output.length === 0) || (output[output.length - 1].trim() === '');
         const nextLineEmpty = (i === lines.length - 1) || (lines[i + 1].trim() === '');
-
         if (prevLineEmpty && nextLineEmpty) {
             const emphasisHeadingMatch = line.match(/^(\s*)(\*\*|__|\*|_)(?!\s)(.+?)(?<!\s)\2\s*$/);
             if (emphasisHeadingMatch) {
                 const innerText = emphasisHeadingMatch[3].trim();
                 const endsWithPunctuation = /[.,!?:;]$/.test(innerText);
-                // Sicherstellen, dass im Inneren nicht das gleiche Emphasis-Zeichen geschlossen und neu geöffnet wurde
                 const marker = emphasisHeadingMatch[2];
                 const isSingleEmphasisSpan = !innerText.includes(marker);
 
                 if (!endsWithPunctuation && isSingleEmphasisSpan) {
-                    // Wie gewünscht einfach "## " vor die hervorgehobene Stelle packen
-                    lines[i] = `${emphasisHeadingMatch[1]}## ${line.trim()}`;
+                    let level = prevHeadingLevel > 0 ? Math.min(prevHeadingLevel + 1, 2) : 2;
+                    prevHeadingLevel = level;
+                    line = `${emphasisHeadingMatch[1]}${'#'.repeat(level)} ${line.trim()}`;
                 }
             }
         }
+
+        // MD033: Non-HTML angle bracket pseudo-tags in prose (z.B. <undefined>, <T>)
+        if (line.includes('<') && line.includes('>')) {
+            line = fixInlinePseudoHtml(line);
+        }
+
+        // MD012: Mehrfache aufeinanderfolgende Leerzeilen reduzieren
+        if (line.trim() === '') {
+            if (output.length > 0 && output[output.length - 1].trim() === '') {
+                continue;
+            }
+        }
+
+        output.push(line);
     }
 
-    // 5. Gesammelte Leerzeilen von hinten nach vorne einfügen, damit die Indizes gültig bleiben
-    for (let k = insertBlankLineBefore.length - 1; k >= 0; k--) {
-        lines.splice(insertBlankLineBefore[k], 0, '');
-    }
-
-    // 4. Fehlende Top-Level-Überschrift: Dateiname als '# Titel' an den Anfang setzen
-    // (bei vorhandenem YAML Front-Matter direkt dahinter), darunter genau eine Leerzeile.
+    // Fehlende Top-Level-Überschrift am Dateianfang ergänzen
     if (!seenTopLevelHeading && !inYamlFrontMatter && headingTitle) {
-        const head = lines.slice(0, frontMatterEndIndex + 1);
-        const rest = lines.slice(frontMatterEndIndex + 1);
-
-        // Führende Leerzeilen entfernen, damit zwischen Überschrift und Inhalt genau eine Leerzeile steht
+        const head = output.slice(0, frontMatterEndIndex + 1);
+        const rest = output.slice(frontMatterEndIndex + 1);
         while (rest.length > 0 && rest[0].trim() === '') {
             rest.shift();
         }
-
-        // '# Titel', eine Leerzeile, dann der restliche Inhalt (bei leerer Datei: Titel + Zeilenumbruch)
         return [...head, `# ${headingTitle}`, '', ...rest].join(lineBreak);
     }
 
-    return lines.join(lineBreak);
+    return output.join(lineBreak);
 }
 
 /**
