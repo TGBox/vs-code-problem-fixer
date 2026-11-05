@@ -5,6 +5,7 @@ exports.deactivate = deactivate;
 const vscode = require("vscode");
 const pythonIdentityFixes_1 = require("./pythonIdentityFixes");
 const aiFormatFixers_1 = require("./aiFormatFixers");
+const pythonTypecastFixes_1 = require("./pythonTypecastFixes");
 /**
  * Globaler Stack für Rückgängig-Operationen (speichert Snapshots pro Durchlauf)
  */
@@ -102,6 +103,7 @@ async function runAutoFixOnAllOpenFiles() {
                 // da die Positionen der Diagnosen danach nicht mehr zum Text passen würden.
                 if (isPython) {
                     await applyPythonIdentityComparisonFixes(document);
+                    await applyPythonTypecastFixes(document);
                     await delay(80);
                 }
                 // Schritt B3: Format-spezifische KI-Regeln anwenden (JSON, YAML, Shell, TOML, SVG/XML, SQL)
@@ -315,6 +317,40 @@ async function applyPythonIdentityComparisonFixes(document) {
         splitAssertions: config.get('splitAssertions', true)
     });
     if (updatedText === originalText) {
+        return false;
+    }
+    const fullRange = new vscode.Range(document.positionAt(0), document.positionAt(originalText.length));
+    const edit = new vscode.WorkspaceEdit();
+    edit.replace(document.uri, fullRange, updatedText);
+    return await vscode.workspace.applyEdit(edit);
+}
+/**
+ * Liest die aktuellen Diagnosen eines Python-Dokuments und entfernt unnötige Typecasts
+ * und Typkonvertierungen (z.B. bool(), str(), int() oder typing.cast()), wenn der Analyzer meldet,
+ * dass das Argument bereits den Zieltyp besitzt.
+ */
+async function applyPythonTypecastFixes(document) {
+    const config = vscode.workspace.getConfiguration('autoFixAll.python');
+    if (!config.get('removeUnnecessaryTypecasts', true)) {
+        return false;
+    }
+    const targets = vscode.languages.getDiagnostics(document.uri)
+        .filter(pythonTypecastFixes_1.isPythonTypecastDiagnostic)
+        .map(d => ({
+        line: d.range.start.line,
+        startChar: d.range.start.character,
+        endChar: d.range.end.line === d.range.start.line
+            ? d.range.end.character
+            : document.lineAt(d.range.start.line).text.length,
+        message: d.message,
+        code: typeof d.code === 'object' && d.code !== null ? String(d.code.value) : String(d.code ?? '')
+    }));
+    if (targets.length === 0) {
+        return false;
+    }
+    const originalText = document.getText();
+    const { text: updatedText, fixedCount } = (0, pythonTypecastFixes_1.fixPythonTypecastsInText)(originalText, targets);
+    if (fixedCount === 0 || updatedText === originalText) {
         return false;
     }
     const fullRange = new vscode.Range(document.positionAt(0), document.positionAt(originalText.length));
@@ -669,6 +705,14 @@ async function removeUnnecessaryTypecastsFromDocument(document) {
             changed = true;
         }
     }
+    // 3. Python unnecessary typecasts and type conversions (Pyrefly, Pylance, Ruff, etc.)
+    const isPython = document.languageId === 'python' || /\.py$/i.test(document.uri.fsPath);
+    if (isPython) {
+        const pythonFixed = await applyPythonTypecastFixes(document);
+        if (pythonFixed) {
+            changed = true;
+        }
+    }
     return changed;
 }
 /**
@@ -692,7 +736,10 @@ async function fixTypecastDiagnostics(document) {
                     if (!action || !('title' in action)) {
                         return false;
                     }
-                    return /fix\s+all.*(unnecessary|assertion|cast)/i.test(action.title) ||
+                    const codeAction = action;
+                    const isFixAllKind = codeAction.kind && (codeAction.kind.value === 'source.fixAll' || codeAction.kind.value.startsWith('source.fixAll.'));
+                    return /fix\s+all.*(unnecessary|assertion|cast|conversion)/i.test(action.title) ||
+                        Boolean(isFixAllKind) ||
                         (action.title.includes('Fix all') && action.title.includes('no-unnecessary-type-assertion'));
                 });
                 if (fixAllAction) {
@@ -778,6 +825,9 @@ async function executeActionCommand(command) {
  * Determines whether a diagnostic represents an unnecessary typecast / type assertion.
  */
 function isUnnecessaryTypecastDiagnostic(diag) {
+    if ((0, pythonTypecastFixes_1.isPythonTypecastDiagnostic)(diag)) {
+        return true;
+    }
     const codeStr = typeof diag.code === 'object' && diag.code !== null
         ? String(diag.code.value)
         : String(diag.code ?? '');
@@ -825,6 +875,11 @@ function isUnnecessaryTypecastCodeAction(action) {
     if (/remove\s+(this\s+)?(unnecessary|redundant|useless)?\s*(type\s*)?(assertion|cast)/i.test(title) ||
         /remove\s+type\s+assertion/i.test(title) ||
         /remove\s+cast\b/i.test(title) ||
+        /remove\s+type\s+conversion/i.test(title) ||
+        /remove\s+[`'"]?\w+\(\)[`'"]?(\s+call)?/i.test(title) ||
+        /unwrap\s+/i.test(title) ||
+        title.includes('unnecessary-type-conversion') ||
+        title.includes('redundant-cast') ||
         /cast\s+is\s+redundant/i.test(title) ||
         title.includes('no-unnecessary-type-assertion') ||
         title.includes('nounnecessarytypeassertion') ||
