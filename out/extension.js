@@ -384,6 +384,8 @@ function getHeadingTitleFromUri(uri) {
  * - MD024: Doppelte und leere Überschriften (z.B. '####' ohne Text oder mehrfache identische Titel)
  * - MD036: Emphasis als Überschrift
  * - MD033: Inline-HTML-Pseudo-Tags (z.B. unmaskiertes <undefined>, <T> im Fließtext)
+ * - MD046 / MD003: Nicht eingefasste Diff- / Git-Konflikt- / SEARCH/REPLACE-Blöcke (<<<<<<< ... >>>>>>>)
+ * - MD009: Unnötige trailing spaces
  * - MD012: Mehrfache aufeinanderfolgende Leerzeilen
  * - Fehlende Top-Level-Überschrift: Dateiname als '# Titel'
  *
@@ -391,8 +393,15 @@ function getHeadingTitleFromUri(uri) {
  *                     Ist er nicht gesetzt, wird keine Überschrift ergänzt.
  */
 function processCustomMarkdownRules(markdownText, headingTitle) {
-    const lines = markdownText.split(/\r?\n/);
-    const lineBreak = markdownText.includes('\r\n') ? '\r\n' : '\n';
+    // Vorverarbeitung 1: Unfenced Git-Konflikte & Aider SEARCH/REPLACE Blöcke erkennen und einbetten (behebt MD025 & MD046)
+    // <<<<<<< SEARCH ... ======= ... >>>>>>> REPLACE
+    let text = markdownText.replace(/(^|\n)(<{7}[^\r\n]*\r?\n[\s\S]*?\r?\n>{7}[^\r\n]*)(?=\r?\n|$)/g, (match, prefix, block) => {
+        return `${prefix}\`\`\`diff\n${block}\n\`\`\``;
+    });
+    // Vorverarbeitung 2: In Blockquotes: '> # Titel' -> '> ## Titel', damit Zitate keine doppelten H1 erzeugen (MD025)
+    text = text.replace(/^(\s*>\s*)#(\s+.*)$/gm, '$1##$2');
+    const lines = text.split(/\r?\n/);
+    const lineBreak = text.includes('\r\n') ? '\r\n' : '\n';
     let inCodeBlock = false;
     let currentFenceChar = '';
     let currentFenceLength = 0;
@@ -406,15 +415,15 @@ function processCustomMarkdownRules(markdownText, headingTitle) {
     const seenHeadingsCount = new Map();
     let inTable = false;
     const standardHtmlTags = /^(a|abbr|b|blockquote|br|code|dd|del|details|dfn|div|dl|dt|em|h[1-6]|hr|i|img|ins|kbd|li|ol|p|pre|q|s|samp|small|span|strong|sub|sup|summary|table|tbody|td|tfoot|th|thead|tr|u|ul|var|wbr|\/.*)$/i;
-    function fixInlinePseudoHtml(text) {
-        const parts = text.split(/(`+[^`]+`+)/);
+    function fixInlinePseudoHtml(rawText) {
+        const parts = rawText.split(/(`+[^`]+`+)/);
         for (let p = 0; p < parts.length; p++) {
             if (parts[p].startsWith('`')) {
                 continue;
             }
-            parts[p] = parts[p].replace(/<([A-Za-z0-9_-]+)>/g, (match, tag) => {
+            parts[p] = parts[p].replace(/<(\/?)([A-Za-z0-9_-]+)>/g, (match, slash, tag) => {
                 if (!standardHtmlTags.test(tag)) {
-                    return `\`<${tag}>\``;
+                    return `\`<${slash}${tag}>\``;
                 }
                 return match;
             });
@@ -508,10 +517,11 @@ function processCustomMarkdownRules(markdownText, headingTitle) {
         if (/^\s*#{1,6}\s*$/.test(line)) {
             continue;
         }
-        // Aider/KI-Artefakte: Überschrift-Hashes vor Listenelementen oder verschachtelten Headings entfernen
+        // Aider/KI-Artefakte: Überschrift-Hashes vor Listenelementen, Blockquotes oder verschachtelten Headings entfernen
         line = line.replace(/^\s*#{1,6}\s+(#{1,6}\s+.*)$/, '$1');
         line = line.replace(/^\s*#{1,6}\s+([-*+]\s+.*)$/, '$1');
         line = line.replace(/^\s*#{1,6}\s+(\d+\.\s+.*)$/, '$1');
+        line = line.replace(/^\s*#{1,6}\s+(>.*)$/, '$1');
         // Überschriften-Logik: MD025, MD001, MD024
         const headingMatch = line.match(/^(\s*)(#{1,6})(\s+.*)$/);
         if (headingMatch) {
@@ -527,8 +537,18 @@ function processCustomMarkdownRules(markdownText, headingTitle) {
                     level = 2;
                 }
             }
-            // MD001: Heading-Ebene darf maximal um 1 steigen
-            if (prevHeadingLevel > 0 && level > prevHeadingLevel + 1) {
+            // MD001: Erste Überschrift muss H1 sein (oder H2 falls schon eine da ist),
+            // danach darf die Ebene um maximal 1 ansteigen
+            if (prevHeadingLevel === 0) {
+                if (!seenTopLevelHeading) {
+                    level = 1;
+                    seenTopLevelHeading = true;
+                }
+                else {
+                    level = Math.min(level, 2);
+                }
+            }
+            else if (level > prevHeadingLevel + 1) {
                 level = prevHeadingLevel + 1;
             }
             prevHeadingLevel = level;
@@ -571,10 +591,20 @@ function processCustomMarkdownRules(markdownText, headingTitle) {
         if (line.includes('<') && line.includes('>')) {
             line = fixInlinePseudoHtml(line);
         }
-        // MD012: Mehrfache aufeinanderfolgende Leerzeilen reduzieren
+        // MD012: Mehrfache aufeinanderfolgende Leerzeilen reduzieren & MD009: Trailing spaces bereinigen
         if (line.trim() === '') {
             if (output.length > 0 && output[output.length - 1].trim() === '') {
                 continue;
+            }
+            line = '';
+        }
+        else {
+            const trailingSpacesMatch = line.match(/([ \t]+)$/);
+            if (trailingSpacesMatch) {
+                const spaces = trailingSpacesMatch[1];
+                if (spaces !== '  ') {
+                    line = line.trimEnd();
+                }
             }
         }
         output.push(line);

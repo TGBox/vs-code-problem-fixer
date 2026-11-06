@@ -2,7 +2,7 @@
   "name": "auto-fix-all-open",
   "displayName": "Auto Fix All Open",
   "description": "Behebt alle automatisch behebbaren Probleme (inkl. spezieller Regeln für Markdown, Python, JSON, YAML, Shell, TOML, SVG und SQL) in allen geöffneten Dateien, speichert diese direkt ab und bietet eine Rückgängig-Funktion.",
-  "version": "1.3.3",
+  "version": "1.3.4",
   "repository": {
     "url": "https://www.github.com/TGBox/vs-code-problem-fixer"
   },
